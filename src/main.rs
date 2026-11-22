@@ -1,16 +1,14 @@
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use std::fs;
-use std::process::Stdio;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::io::{self, IsTerminal};
+use std::fs::OpenOptions;
+use std::process::{Command, Stdio};
 
 #[derive(Parser)]
-#[command(name = "hexin", version, disable_version_flag = false, about = "Hexin: The AI Powered Hyprland + Quickshell Config")]
+#[command(name = "hexin", version, about = "Hexin: The AI Powered Hyprland + Quickshell Config")]
 struct Cli {
-    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
-    version: (),
     #[command(subcommand)]
     command: Commands,
 }
@@ -92,7 +90,7 @@ fn cmd_update(dry_run: bool, check: bool) -> Result<(), Box<dyn std::error::Erro
             None => eprintln!("[dry-run] {}: neither `yay` nor `paru` found; skipping AUR update", yellow("WARN")),
         }
         match flatpak {
-            Some(flatpak_cmd) => println!("[dry-run] flatpak update"),
+            Some(_flatpak_cmd) => println!("[dry-run] flatpak update"),
             None => eprintln!("[dry-run] {}: Flatpak is not installed; skipping flatpak update", yellow("WARN")),
         }
         return Ok(());
@@ -369,18 +367,15 @@ fn cmd_backup(dst: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error + 's
     let required_dirs = [
         "hypr",
         "quickshell",
+        "hexin",
         "matugen",
         "kitty",
         "gtk-3.0",
         "gtk-4.0",
-        "rofi",
-        "waybar",
-        "fuzzel",
-        "swaync",
     ];
     let found_dirs = existing_config_dirs(&required_dirs)?;
     let home = std::env::var("HOME")?;
-    let base_backup_dir = PathBuf::from(home).join(".local/share/hexin/backups");
+    let base_backup_dir = xdg_data_home(Path::new(&home)).join("hexin/backups");
 
     let backup_dir = match dst {
         Some(path) => {
@@ -413,14 +408,11 @@ fn cmd_restore(src: Option<PathBuf>, force: bool, list: bool) -> Result<(), Box<
     let required_dirs = [
         "hypr",
         "quickshell",
+        "hexin",
         "matugen",
         "kitty",
         "gtk-3.0",
         "gtk-4.0",
-        "rofi",
-        "waybar",
-        "fuzzel",
-        "swaync",
     ];
     let home = std::env::var("HOME")?;
     let home_path = PathBuf::from(home);
@@ -632,25 +624,16 @@ fn reload_desktop_after_restore() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 2. Stop existing qs / quickshell instances (ignore if none were running)
-    let _ = Command::new("pkill")
-        .arg("qs")
+    let _ = Command::new("qs")
+        .args(["kill", "-c", "hexin"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
 
-    let _ = Command::new("pkill")
-        .arg("quickshell")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-
+    let home = std::env::var("HOME")?;
+    let home_path = PathBuf::from(home);
     // 3. Start Quickshell detached so `hexin restore` doesn't hang
-    Command::new("qs")
-        .args(["-c", "hexin"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+    spawn_quickshell(&home_path)?;
 
     Ok(())
 }
@@ -707,29 +690,49 @@ fn reboot_required() -> bool {
     let Ok(output) = Command::new("uname").arg("-r").output() else {
         return false;
     };
-    let running = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if running.is_empty() {
+    let running = output.stdout.as_slice();
+    let running_str = String::from_utf8_lossy(running).trim();
+    if running_str.is_empty() {
         return false;
     }
+    !Path::new("/usr/lib/modules").join(running_str).exists()
+}
 
-    let modules_dir = Path::new("/usr/lib/modules");
-    let Ok(entries) = fs::read_dir(modules_dir) else {
-        return false;
-    };
-
-    let mut installed_kernels: Vec<String> = entries
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| e.file_name().into_string().ok())
-        .collect();
-
-    if installed_kernels.is_empty() {
-        return false;
+fn xdg_data_home(home_path: &Path) -> PathBuf {
+    match std::env::var_os("XDG_DATA_HOME") {
+        Some(val) if !val.is_empty() => PathBuf::from(val),
+        _ => home_path.join(".local/share"),
     }
+}
 
-    installed_kernels.sort();
-    match installed_kernels.last() {
-        Some(latest) => latest != &running,
-        None => false,
+fn spawn_quickshell(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let state_dir = xdg_state_home(home).join("hexin");
+    fs::create_dir_all(&state_dir)?;
+
+    let log_path = state_dir.join("shell.log");
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+
+    let log_err = log_file.try_clone()?;
+
+    Command::new("setsid")
+        .arg("-f") // fork and run in a new session (if supported) or `setsid qs ...`
+        .arg("qs")
+        .arg("-c")
+        .arg("hexin")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(log_err))
+        .spawn()?;
+
+    Ok(())
+}
+
+fn xdg_state_home(home: &Path) -> PathBuf {
+    match std::env::var_os("XDG_STATE_HOME") {
+        Some(val) if !val.is_empty() => PathBuf::from(val),
+        _ => home.join(".local/state"),
     }
 }
