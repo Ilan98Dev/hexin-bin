@@ -95,6 +95,9 @@ enum Commands {
         /// Show what would be written without touching anything.
         #[arg(long)]
         dry_run: bool,
+        /// Do not restart or reload Hyprland and the shell afterwards.
+        #[arg(long)]
+        no_reload: bool,
     },
 
     /// Check the system and the Hexin installation.
@@ -141,7 +144,8 @@ fn main() -> Result<()> {
             force,
             force_settings,
             dry_run,
-        } => cmd_materialize(&src, &bin_src, force, force_settings, dry_run),
+            no_reload,
+        } => cmd_materialize(&src, &bin_src, force, force_settings, dry_run, no_reload),
         Commands::Doctor { json, strict } => cmd_doctor(json, strict),
         Commands::Backup { dst } => cmd_backup(dst),
         Commands::Restore { src, force, list } => cmd_restore(src, force, list),
@@ -370,6 +374,7 @@ fn cmd_materialize(
     force: bool,
     force_settings: bool,
     dry_run: bool,
+    no_reload: bool,
 ) -> Result<()> {
     if !src.is_dir() {
         return Err(format!(
@@ -422,7 +427,7 @@ fn cmd_materialize(
         println!("Skipped {skipped} existing file(s); pass --force to overwrite them.");
     }
 
-    if !dry_run && stats.written + bin_written > 0 {
+    if !dry_run && stats.written + bin_written > 0 && !no_reload {
         reload_desktop();
     }
     Ok(())
