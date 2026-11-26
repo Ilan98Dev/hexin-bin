@@ -1118,7 +1118,7 @@ fn check_ydotool() -> Finding {
         .status()
     {
         Ok(status) if status.success() => Finding::ok("ydotool.service is active"),
-        Ok(_) => Finding::warn("ydotool.service is not active (UnityAgent mouse control needs it)"),
+        Ok(_) => Finding::warn("ydotool.service is not active (HexinAgent mouse control needs it)"),
         Err(_) => Finding::warn("`systemctl` not found; cannot check ydotool.service"),
     }
 }
@@ -1152,9 +1152,9 @@ fn check_agent_settings(home: &Path) -> Finding {
     let path = state_root()
         .unwrap_or_else(|_| home.join(".local/state"))
         .join(APP)
-        .join("unityagent/settings.json");
+        .join("hexinagent/settings.json");
     if !path.is_file() {
-        return Finding::warn(format!("UnityAgent settings not found: {}", path.display()));
+        return Finding::warn(format!("HexinAgent settings not found: {}", path.display()));
     }
     match fs::metadata(&path) {
         Ok(meta) => {
@@ -1165,7 +1165,7 @@ fn check_agent_settings(home: &Path) -> Finding {
                     path.display()
                 ))
             } else {
-                Finding::ok("UnityAgent settings are private (mode 600)")
+                Finding::ok("HexinAgent settings are private (mode 600)")
             }
         }
         Err(error) => Finding::warn(format!("could not read {}: {error}", path.display())),
